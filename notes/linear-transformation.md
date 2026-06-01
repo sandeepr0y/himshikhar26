@@ -1,3 +1,5 @@
+### Linear Transformation:
+
 A linear transformation is a function between two vector spaces that preserves the operations of vector addition and scalar multiplication. In simpler terms, it's a way to transform vectors (like points on a plane) that keeps lines straight and the origin fixed.
 
 For a transformation $T$ to be linear, it must satisfy two main properties:
@@ -10,7 +12,7 @@ For a transformation $T$ to be linear, it must satisfy two main properties:
 
 ---
 
-### Example from the Image:
+### Example:
 
 Let's look at the example provided in the image to see these properties in action.
 The transformation is defined as $T: \mathbb{R}^2 \to \mathbb{R}^2$ by $T(a_1, a_2) = (2a_1 + a_2, a_1)$.
