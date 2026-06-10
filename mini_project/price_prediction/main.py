@@ -3,6 +3,7 @@
 import pandas as pd
 from datetime import datetime
 
+import joblib
 from sklearn.preprocessing import OneHotEncoder, TargetEncoder, StandardScaler
 from sklearn.compose import ColumnTransformer
 from sklearn.model_selection import train_test_split
@@ -19,6 +20,12 @@ def get_df():
     app_root = get_app_root()
     csv_path = app_root / 'data' / 'used_cars.csv'
     return pd.read_csv(csv_path)
+
+
+def save_model(model_pipeline, filename='car_price_model.joblib'):
+    app_root = get_app_root()
+    model_path = app_root / 'models' / filename
+    joblib.dump(model_pipeline, model_path)
 
 
 def get_transformer():
@@ -209,6 +216,8 @@ def main():
 
     print("\nSample Predictions Comparison:")
     print(comparison_df.head(10).round(2))
+
+    # save_model(model_pipeline, filename='used_car_price_model.joblib')
 
 
 if __name__ == "__main__":
