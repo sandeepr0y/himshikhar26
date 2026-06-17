@@ -217,7 +217,7 @@ def main():
     print("\nSample Predictions Comparison:")
     print(comparison_df.head(10).round(2))
 
-    # save_model(model_pipeline, filename='used_car_price_model.joblib')
+    save_model(model_pipeline, filename='used_car_price_model.joblib')
 
 
 if __name__ == "__main__":
