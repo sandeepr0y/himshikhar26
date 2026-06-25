@@ -28,5 +28,6 @@ RUN pip install opencv-python-headless==4.9.0.80 opencv-fixer==0.2.5 && \
 RUN pip install --no-cache-dir matplotlib --upgrade-strategy only-if-needed
 RUN pip install pathlib seaborn
 RUN pip install --upgrade scikit-learn cvxpy
+RUN pip install --upgrade ultralytics
 
 CMD ["tail", "-f", "/dev/null"]
