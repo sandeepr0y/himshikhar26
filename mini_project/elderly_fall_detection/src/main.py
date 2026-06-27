@@ -1,8 +1,10 @@
 import os
 import cv2
+from collections import deque
 from ultralytics import YOLO
 
-from utils import get_app_root, slice_video, get_body_angle, get_box_ratio
+from utils import get_app_root, slice_video
+from inference import infer_pose_status, infer_fall
 
 
 RAW_VIDEOS = [
@@ -17,7 +19,7 @@ class ElderlyFallDetection(object):
         self._app_root = app_root
         self._model_path = app_root / 'models' / 'yolo26m-pose.pt'
         self._model = None
-        self._person_track = {}
+        self._track_history = {}
     
     @property
     def model(self):
@@ -57,66 +59,42 @@ class ElderlyFallDetection(object):
         la_x, la_y = int(left_ankle[0]), int(left_ankle[1])
         ra_x, ra_y = int(right_ankle[0]), int(right_ankle[1])
 
-        body_angle = get_body_angle(
-            (ls_x, ls_y, lh_x, lh_y,),
-            (rs_x, rs_y, rh_x, rh_y,),
-        )
+        is_lying, body_angle, box_ratio = infer_pose_status(box, person_kp, self._track_history[track_id])
 
-        box_ratio = get_box_ratio(bb_x2 - bb_x1, bb_y2 - bb_y1)
+        # Compute an average hip midpoint height (Y-axis)
+        hip_y = (lh_y + rh_y) / 2.0 if (lh_y > 0 and rh_y > 0) else max(lh_y, rh_y)
+
+        self._track_history[track_id].append({
+            'body_angle': body_angle,
+            'box_ratio': box_ratio,
+            'is_lying': is_lying,
+            'hip_y': hip_y                  #  Added for velocity checks
+        })
+
+        is_falling_event, alert_score = infer_fall(self._track_history[track_id], is_lying)
+        
         red = (0, 0, 255)
         blue = (255, 0, 0)
         green = (0, 255, 0)
         black = (0, 0, 0)
-        is_lying = False
-
-        if body_angle > 65 and box_ratio < 1:
-            status = "Lying Down"
-            text_color = red
-            is_lying = True
-        else:
-            shoulder_y = ls_y if ls_y > 0 else rs_y
-            if shoulder_y > 0:
-                for _y in (lk_y, la_y, rk_y, ra_y,):
-                    if _y > 0 and _y <= shoulder_y:
-                        is_lying = True
-                        break
         
+        # if is_lying:
+        #     status = "Lying Down"
+        #     text_color = red
+        # else:
+        #     status = "Standing"
+        #     text_color = green
+
         if is_lying:
-            status = "Lying Down"
-            text_color = red
-        elif box_ratio < 1:
-            if track_id in self._person_track:
-                is_lying = self._person_track[track_id]['is_lying']
-                if is_lying:
-                    status = "Lying Down"
-                    text_color = red
-                else:
-                    status = "Standing"
-                    text_color = green
-            else:
-                # give preference to box-ratio
-                status = "Lying Down"
+            if is_falling_event or alert_score >= 75:
+                status = "⚠ CRITICAL FALL DETECTED ⚠"
                 text_color = red
-                is_lying = True
+            else:
+                status = "Lying Down (Safe/Controlled)"
+                text_color = blue
         else:
             status = "Standing"
             text_color = green
-        
-        self._person_track[track_id] = {
-            'body_angle': body_angle,
-            'box_ratio': box_ratio,
-            'is_lying': is_lying
-        }
-
-        # if body_angle < 0:
-        #     status = "Unknown"
-        #     text_color = (255, 0, 0) # Blue for Unknown
-        # if body_angle > 65:
-        #     status = "Lying Down"
-        #     text_color = (0, 0, 255) # Red for danger/lying down
-        # else:
-        #     status = "Standing"
-        #     text_color = (0, 255, 0) # Green for standing
 
         # Only draw/process if the keypoints are actually detected (not 0,0)
         if ls_x > 0 and ls_y > 0:
@@ -143,14 +121,17 @@ class ElderlyFallDetection(object):
         if ra_x > 0 and ra_y > 0:
             cv2.circle(frame, (ra_x, ra_y), 2, black, -1) # Black circle on Right Ankle
         
-        cv2.putText(frame, f"{status}, {body_angle:.2f}, {box_ratio:.2f}", (bb_x1, bb_y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.3, text_color, 1)
+        cv2.putText(frame, status, (bb_x1, bb_y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.3, text_color, 1)
 
         return frame
     
     def track(self):
         # video_file = self._app_root / os.sep.join(('data', 'rgb', 'fall',)) / 'fall-01-cam0.mp4'
-        # video_file = self._app_root / os.sep.join(('data', 'rgb', 'fall',)) / 'fall-04-cam0.mp4'
-        video_file = self._app_root / os.sep.join(('data', 'rgb', 'adl',)) / 'adl-01-cam0.mp4'
+        video_file = self._app_root / os.sep.join(('data', 'rgb', 'fall',)) / 'fall-04-cam0.mp4'
+        # video_file = self._app_root / os.sep.join(('data', 'rgb', 'adl',)) / 'adl-01-cam0.mp4'
+        # video_file = self._app_root / os.sep.join(('data', 'rgb', 'adl',)) / 'adl-36-cam0.mp4'
+        # video_file = self._app_root / os.sep.join(('data', 'rgb', 'adl',)) / 'adl-33-cam0.mp4'
+        # video_file = self._app_root / os.sep.join(('data', 'rgb', 'adl',)) / 'adl-40-cam0.mp4'
         cap = cv2.VideoCapture(video_file)
 
         # Get properties of the original video
@@ -160,8 +141,11 @@ class ElderlyFallDetection(object):
 
         fourcc = cv2.VideoWriter_fourcc(*'mp4v') 
         # output_path = self._app_root / 'data' / 'detect' / 'fall-01-cam0.mp4'
-        # output_path = self._app_root / 'data' / 'detect' / 'fall-04-cam0.mp4'
-        output_path = self._app_root / 'data' / 'detect' / 'adl-01-cam0.mp4'
+        output_path = self._app_root / 'data' / 'detect' / 'fall-04-cam0.mp4'
+        # output_path = self._app_root / 'data' / 'detect' / 'adl-01-cam0.mp4'
+        # output_path = self._app_root / 'data' / 'detect' / 'adl-36-cam0.mp4'
+        # output_path = self._app_root / 'data' / 'detect' / 'adl-33-cam0.mp4'
+        # output_path = self._app_root / 'data' / 'detect' / 'adl-40-cam0.mp4'
         if os.path.exists(output_path):
             os.remove(output_path)
         out = cv2.VideoWriter(output_path, fourcc, fps, (frame_width, frame_height))
@@ -182,6 +166,8 @@ class ElderlyFallDetection(object):
                 keypoints_data = results[0].keypoints.xy.cpu().numpy()
 
                 for box, track_id, person_kp in zip(boxes, track_ids, keypoints_data):
+                    if track_id not in self._track_history:
+                        self._track_history[track_id] = deque(maxlen=60)
                     frame = self.__process_frame(frame, box, track_id, person_kp)
             
             # Write the annotated frame to the output video
